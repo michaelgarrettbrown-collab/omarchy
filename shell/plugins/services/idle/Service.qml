@@ -181,8 +181,12 @@ Item {
   }
 
   function maybeSuspend() {
-    if (!root.idleEnabled || root.suspendTimeoutSeconds < 1) return
-    if (!suspendInputIdleMonitor.isIdle || !suspendInhibitorMonitor.isIdle) return
+    if (!IdleModel.shouldSuspend(
+      suspendInputIdleMonitor.isIdle,
+      suspendInhibitorMonitor.isIdle,
+      root.idleEnabled,
+      root.suspendTimeoutSeconds
+    )) return
 
     runProcess(suspendProcess, "suspend", "omarchy-toggle-enabled suspend-off || systemctl suspend")
   }

@@ -18,8 +18,17 @@ assertEqual(idle.optionalSecondsFromConfig(0), -1, 'idle disables a zero optiona
 assertEqual(idle.optionalSecondsFromConfig(0.5), -1, 'idle disables an optional timeout flooring below one second')
 assertEqual(idle.optionalSecondsFromConfig('-1'), -1, 'idle disables a negative optional timeout')
 assertEqual(idle.optionalSecondsFromConfig('nope'), -1, 'idle disables an invalid optional timeout')
+assertEqual(idle.optionalSecondsFromConfig(true), -1, 'idle rejects a boolean optional timeout')
+assertEqual(idle.optionalSecondsFromConfig([900]), -1, 'idle rejects an array optional timeout')
+assertEqual(idle.optionalSecondsFromConfig({ value: 900 }), -1, 'idle rejects an object optional timeout')
 assertEqual(idle.optionalSecondsFromConfig('999999999'), idle.MAX_TIMEOUT_SECONDS, 'idle clamps an optional timeout at the safe timer ceiling')
 assertEqual(idle.MAX_TIMEOUT_SECONDS, 2147483, 'idle derives the safe timer ceiling in seconds')
+
+assertEqual(idle.shouldSuspend(true, true, true, 900), true, 'idle suspend runs only when its input clock and inhibitor gate are idle')
+assertEqual(idle.shouldSuspend(false, true, true, 900), false, 'idle suspend waits for its input clock')
+assertEqual(idle.shouldSuspend(true, false, true, 900), false, 'idle suspend waits for its inhibitor gate')
+assertEqual(idle.shouldSuspend(true, true, false, 900), false, 'idle suspend follows Stay Awake')
+assertEqual(idle.shouldSuspend(true, true, true, -1), false, 'idle suspend remains disabled without a valid timeout')
 
 assertDeepEqual(idle.eventParts({ data: 'a,b,c' }, 2), ['a', 'b', 'c'], 'idle parses raw event data')
 assertDeepEqual(
@@ -56,8 +65,9 @@ grep -F 'timeout: 1' <<<"$suspend_inhibitor_monitor" >/dev/null ||
   fail "idle suspend uses a short inhibitor gate"
 grep -F 'respectInhibitors: true' <<<"$suspend_inhibitor_monitor" >/dev/null ||
   fail "idle suspend respects system sleep inhibitors"
-grep -F '!suspendInputIdleMonitor.isIdle || !suspendInhibitorMonitor.isIdle' "$idle_service" >/dev/null ||
-  fail "idle suspend waits for both its input clock and inhibitor gate"
+maybe_suspend=$(sed -n '/^  function maybeSuspend()/,/^  }$/p' "$idle_service")
+grep -F 'IdleModel.shouldSuspend(' <<<"$maybe_suspend" >/dev/null ||
+  fail "idle suspend delegates its launch decision to the tested model"
 grep -F 'omarchy-toggle-enabled suspend-off || systemctl suspend' "$idle_service" >/dev/null ||
   fail "idle suspend honors suspend-off before using systemctl suspend"
 pass "Idle suspend is opt-in, input-timed, and inhibitor-aware"
