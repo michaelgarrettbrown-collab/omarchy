@@ -18,6 +18,8 @@ assertEqual(idle.optionalSecondsFromConfig(0), -1, 'idle disables a zero optiona
 assertEqual(idle.optionalSecondsFromConfig(0.5), -1, 'idle disables an optional timeout flooring below one second')
 assertEqual(idle.optionalSecondsFromConfig('-1'), -1, 'idle disables a negative optional timeout')
 assertEqual(idle.optionalSecondsFromConfig('nope'), -1, 'idle disables an invalid optional timeout')
+assertEqual(idle.optionalSecondsFromConfig('999999999'), idle.MAX_TIMEOUT_SECONDS, 'idle clamps an optional timeout at the safe timer ceiling')
+assertEqual(idle.MAX_TIMEOUT_SECONDS, 2147483, 'idle derives the safe timer ceiling in seconds')
 
 assertDeepEqual(idle.eventParts({ data: 'a,b,c' }, 2), ['a', 'b', 'c'], 'idle parses raw event data')
 assertDeepEqual(
@@ -44,14 +46,21 @@ assertDeepEqual(
 JS
 
 idle_service="$ROOT/shell/plugins/services/idle/Service.qml"
-suspend_monitor=$(sed -n '/^  IdleMonitor {$/,/^  }$/p' "$idle_service" | sed -n '/id: suspendIdleMonitor/,/^  }$/p')
-grep -F 'enabled: root.idleEnabled && root.suspendTimeoutSeconds > 0' <<<"$suspend_monitor" >/dev/null ||
+suspend_input_monitor=$(sed -n '/id: suspendInputIdleMonitor/,/^  }$/p' "$idle_service")
+suspend_inhibitor_monitor=$(sed -n '/id: suspendInhibitorMonitor/,/^  }$/p' "$idle_service")
+grep -F 'enabled: root.idleEnabled && root.suspendTimeoutSeconds > 0' <<<"$suspend_input_monitor" >/dev/null ||
   fail "idle suspend follows the Stay Awake state and remains opt-in"
-grep -F 'respectInhibitors: true' <<<"$suspend_monitor" >/dev/null ||
+grep -F 'respectInhibitors: false' <<<"$suspend_input_monitor" >/dev/null ||
+  fail "idle suspend counts from physical input rather than compositor window events"
+grep -F 'timeout: 1' <<<"$suspend_inhibitor_monitor" >/dev/null ||
+  fail "idle suspend uses a short inhibitor gate"
+grep -F 'respectInhibitors: true' <<<"$suspend_inhibitor_monitor" >/dev/null ||
   fail "idle suspend respects system sleep inhibitors"
+grep -F '!suspendInputIdleMonitor.isIdle || !suspendInhibitorMonitor.isIdle' "$idle_service" >/dev/null ||
+  fail "idle suspend waits for both its input clock and inhibitor gate"
 grep -F 'omarchy-toggle-enabled suspend-off || systemctl suspend' "$idle_service" >/dev/null ||
   fail "idle suspend honors suspend-off before using systemctl suspend"
-pass "Idle suspend is opt-in and follows idle and suspend inhibition"
+pass "Idle suspend is opt-in, input-timed, and inhibitor-aware"
 
 test_tmp=$(mktemp -d)
 trap 'rm -rf "$test_tmp"' EXIT

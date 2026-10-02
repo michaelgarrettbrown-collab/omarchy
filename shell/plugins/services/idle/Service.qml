@@ -180,11 +180,21 @@ Item {
     else handleActiveSignal()
   }
 
-  function handleSuspendIdleChanged() {
-    logEvent("suspend-idle-monitor", suspendIdleMonitor.isIdle ? "idle" : "active")
-    if (!suspendIdleMonitor.isIdle || !root.idleEnabled || root.suspendTimeoutSeconds < 1) return
+  function maybeSuspend() {
+    if (!root.idleEnabled || root.suspendTimeoutSeconds < 1) return
+    if (!suspendInputIdleMonitor.isIdle || !suspendInhibitorMonitor.isIdle) return
 
     runProcess(suspendProcess, "suspend", "omarchy-toggle-enabled suspend-off || systemctl suspend")
+  }
+
+  function handleSuspendInputIdleChanged() {
+    logEvent("suspend-input-idle-monitor", suspendInputIdleMonitor.isIdle ? "idle" : "active")
+    maybeSuspend()
+  }
+
+  function handleSuspendInhibitorChanged() {
+    logEvent("suspend-inhibitor-monitor", suspendInhibitorMonitor.isIdle ? "idle" : "active")
+    maybeSuspend()
   }
 
   function statusJson() {
@@ -199,7 +209,8 @@ Item {
       screensaver: root.screensaverTimeoutSeconds,
       lock: root.lockTimeoutSeconds,
       suspend: root.suspendTimeoutSeconds,
-      suspendIdle: suspendIdleMonitor.isIdle,
+      suspendInputIdle: suspendInputIdleMonitor.isIdle,
+      suspendInhibitorIdle: suspendInhibitorMonitor.isIdle,
       screensaverDelay: root.screensaverDelaySeconds,
       lockDelay: root.lockDelaySeconds,
       screensaverWindows: root.screensaverWindowCount,
@@ -269,11 +280,23 @@ Item {
   }
 
   IdleMonitor {
-    id: suspendIdleMonitor
+    id: suspendInputIdleMonitor
     enabled: root.idleEnabled && root.suspendTimeoutSeconds > 0
     timeout: Math.max(1, root.suspendTimeoutSeconds)
+    // This clock is tied to physical input only. Opening the screensaver or
+    // lock screen must not restart a configured suspend countdown.
+    respectInhibitors: false
+    onIsIdleChanged: root.handleSuspendInputIdleChanged()
+  }
+
+  IdleMonitor {
+    id: suspendInhibitorMonitor
+    enabled: root.idleEnabled && root.suspendTimeoutSeconds > 0
+    // A short inhibitor-aware gate preserves video and system inhibitor
+    // handling without allowing compositor window events to reset the clock.
+    timeout: 1
     respectInhibitors: true
-    onIsIdleChanged: root.handleSuspendIdleChanged()
+    onIsIdleChanged: root.handleSuspendInhibitorChanged()
   }
 
   Timer {
